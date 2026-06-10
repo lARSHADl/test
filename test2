@@ -1,0 +1,382 @@
+Project Handoff: DCP Resolution Engine
+Goal
+
+Build a Spring Boot microservice that verifies and resolves slot values coming from a Python banking assistant before workflow execution.
+
+The service should:
+
+validate slot values
+do exact match
+do fuzzy match
+return suggestions
+return canonical/normalized values
+be reusable for future reference-data sources
+
+Example input:
+
+{
+  "workflow": "new_payment",
+  "slots": {
+    "account": "abc.savings",
+    "beneficiary": "jonh",
+    "currency": "INR",
+    "payment_method": "RTGS"
+  }
+}
+
+The service is a single source of truth for slot verification / resolution.
+
+Final project name
+
+Use:
+
+Group: com.bank.dcp
+Artifact: dcp-resolution-engine
+Package: com.bank.dcp.resolutionengine
+Main class: DcpResolutionEngineApplication
+
+The service name should be “DCP Resolution Engine”.
+
+Current stage
+
+This is a POC, not production yet.
+
+Keep it simple, clean, SOLID, and easy to evolve.
+
+Do not overengineer with full clean architecture, CQRS, Kafka, service discovery, or event sourcing.
+
+Final architecture decision
+
+Use a normal layered Spring Boot architecture, not full hexagonal architecture for now.
+
+Package layout:
+
+com.bank.dcp.resolutionengine
+
+├── controller
+├── service
+├── datasource
+├── model
+├── exception
+├── advice
+├── config
+├── security
+└── util
+
+Notes:
+
+controller = REST endpoint only
+service = business logic only
+datasource = data access abstraction + implementation
+model = DTOs / request / response / enums
+exception = custom exceptions
+advice = global exception handling
+config = Spring configs
+security = filters/security-related code
+
+Keep the main application class at the root package level:
+
+package com.bank.dcp.resolutionengine;
+
+@SpringBootApplication
+public class DcpResolutionEngineApplication {}
+Stack choice
+
+Use:
+
+Java 21
+Spring Boot 4.x for the POC
+Gradle Groovy DSL
+
+There was discussion about Spring Boot 3.5.x being more battle-tested, but for this POC the current direction is Spring Boot 4.x as long as dependencies are compatible.
+
+Spring Initializr settings
+
+Choose:
+
+Project: Gradle - Groovy
+Language: Java
+Spring Boot: 4.x
+Java: 21
+Packaging: Jar
+
+Select only these dependencies initially:
+
+Spring Web
+Validation
+Spring Security
+Spring Boot Actuator
+Lombok
+
+Do not add these yet:
+
+Prometheus
+Swagger/OpenAPI
+Resilience4j
+Kafka
+Redis
+JPA / database
+Config Server
+Eureka
+Feign
+Docker / Kubernetes
+
+Add later via Gradle:
+
+io.github.resilience4j:resilience4j-spring-boot3
+org.apache.commons:commons-text
+org.springdoc:springdoc-openapi-starter-webmvc-ui
+io.micrometer:micrometer-registry-prometheus
+What to build first
+
+Do not start with the controller.
+
+Build in this order:
+
+SlotType enum
+SlotDataSource interface
+FileSlotDataSource or ReferenceDataSource implementation
+ExactMatchService
+FuzzyMatchService
+ResolutionService
+Controller
+Global exception handling
+Security / correlation filters
+Actuator and metrics
+First domain object
+
+Create model/SlotType.java with:
+
+public enum SlotType {
+    ACCOUNT,
+    BENEFICIARY,
+    PAYMENT_METHOD,
+    CURRENCY,
+    TEMPLATE_NAME,
+    AMOUNT
+}
+
+This enum is the source of truth for slot categories.
+
+Data source direction
+
+Do not design for a specific backend yet.
+
+Use a single abstraction:
+
+SlotDataSource
+or
+ReferenceDataSource
+
+Later possible implementations:
+
+file-based
+in-memory
+database
+API
+
+For now, the concrete implementation can simply be file-backed or in-memory.
+
+File/data model expectations
+
+The notes reference these files:
+
+account.txt
+beneficiary.txt
+method.txt
+currency.txt
+template.txt
+
+Example content style:
+
+account values are user-scoped
+beneficiary values are user-scoped
+method/currency values are global
+
+The service should be stateless.
+
+Headers expected on requests
+
+Carry these headers:
+
+X-Correlation-Id
+X-Request-Id
+X-User-Id
+X-Session-Id
+X-Tenant-Id
+X-Source-Service
+Authorization
+
+These are for enterprise-style traceability and future-proofing.
+
+Request schema
+
+Use something like this:
+
+{
+  "workflow": "new_payment",
+  "userId": "user1",
+  "sessionId": "sess-123",
+  "tenantId": "tenantA",
+  "slots": {
+    "account": "abc.savings",
+    "beneficiary": "jonh",
+    "currency": "INR",
+    "payment_method": "RTGS"
+  }
+}
+
+Important:
+
+the service should not need to know workflow internals
+Python decides which slots to verify
+the service only verifies the slots it receives
+Response schema
+
+Use something like this:
+
+{
+  "allVerified": false,
+  "workflow": "new_payment",
+  "results": {
+    "account": {
+      "verified": true,
+      "exactMatch": true,
+      "canonicalValue": "abc.savings",
+      "suggestions": []
+    },
+    "beneficiary": {
+      "verified": false,
+      "exactMatch": false,
+      "canonicalValue": null,
+      "suggestions": [
+        "john",
+        "johnny"
+      ]
+    }
+  }
+}
+
+Fields:
+
+allVerified = true only if every slot passed
+verified = slot accepted or not
+exactMatch = direct match or fuzzy/derived
+canonicalValue = normalized final value
+suggestions = close alternatives
+Error response schema
+
+Use a consistent error response like:
+
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Request validation failed",
+  "details": {
+    "userId": "must not be blank"
+  }
+}
+Exception handling design
+
+Use both:
+
+exception package
+
+Contains custom exception classes only:
+
+ResolutionException
+DataSourceException
+ResourceNotFoundException
+ValidationException
+advice package
+
+Contains global exception handler:
+
+GlobalExceptionHandler
+
+This handler should catch exceptions and map them to API responses.
+
+Also handle validation exceptions like:
+
+MethodArgumentNotValidException
+Coding best practices
+
+Follow these rules:
+
+constructor injection only
+use @RequiredArgsConstructor
+avoid field injection
+use record for DTOs where possible
+avoid System.out.println
+use LoggerFactory
+validate at the API boundary with @Valid
+keep controller thin
+keep service pure and business-focused
+keep datasource responsible only for data access
+Security / ops / resilience
+
+These are desired eventually, but not first-day blockers:
+
+correlation ID filter
+auth filter / API key
+Actuator
+Prometheus metrics
+Resilience4j retry
+circuit breaker
+timeout
+OpenAPI/Swagger
+
+The service should be stateless and horizontally scalable.
+
+What not to do yet
+
+Do not introduce:
+
+full hexagonal architecture
+separate file/db/api adapter packages right now
+CQRS
+event sourcing
+Kafka
+service discovery
+Redis
+database integration before the core POC is proven
+
+The earlier discussion explicitly rejected speculative architecture for now.
+
+The architecture debate outcome
+
+There were multiple options discussed:
+
+normal layered architecture
+package-by-feature
+hexagonal / ports & adapters
+clean architecture
+
+Final practical choice for now:
+normal Spring layered architecture
+
+Reason:
+
+one team
+one service
+unknown concrete source of data
+POC stage
+avoid overengineering
+Build sequence to continue with
+
+Next should be:
+
+create package structure
+create SlotType
+create SlotDataSource
+create in-memory or file-backed implementation
+add exact match
+add fuzzy match
+add ResolutionService
+add DTOs
+add controller
+add global exception handling
+add security and headers
+add Actuator / observability
+One-line summary for another AI
+
+Build a POC Spring Boot 4 / Java 21 / Gradle Groovy microservice called dcp-resolution-engine using a normal layered structure, with SlotType, SlotDataSource, exact/fuzzy matching, clean DTOs, global exception handling, thin controllers, and future-ready but not overengineered architecture.
